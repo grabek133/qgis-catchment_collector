@@ -23,13 +23,17 @@
 """
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
+from qgis.PyQt.QtWidgets import QAction, QMessageBox
+
+from qgis.core import QgsMapLayerProxyModel, QgsFieldProxyModel, QgsProject
 
 # Initialize Qt resources from file resources.py
 from .resources import *
 # Import the code for the dialog
 from .catchment_collector_dialog import CatchmentCollectorDialog
 import os.path
+import os
+import requests
 
 
 class CatchmentCollector:
@@ -189,6 +193,35 @@ class CatchmentCollector:
             self.first_start = False
             self.dlg = CatchmentCollectorDialog()
 
+        self.dlg.mcbLayer.setFilters(QgsMapLayerProxyModel.PolygonLayer)
+        self.dlg.fcbCode.setFilters(QgsFieldProxyModel.String)
+
+        QMessageBox.information(self.dlg, "Message", "Lista JCWP zostanie utworzona pod warunkiem, że warstwa ze zlewnią jest aktywna i wybrane sa elementy warstwy. Jeśli tego nie zrobiłeś wyłącz program, aktywuj warstwę ze zlewnią i uruchom ponownie ")
+
+        # Ustawienie aktywnej warstwy
+        active_layer = self.iface.activeLayer()
+        if active_layer:
+            self.dlg.mcbLayer.setLayer(active_layer)
+
+        # Inicjalizacja list przed pobraniem wartości pól
+        self.jcw_pow_list = []
+        self.jcw_pod_list = []
+
+        # Pobranie wartości pól tylko dla zaznaczonych obiektów
+        selected_layer = self.dlg.mcbLayer.currentLayer()
+        selected_field = self.dlg.fcbCode.currentField()
+        if selected_layer and selected_field:
+            codes = set()
+            for feature in selected_layer.selectedFeatures():  # Pobiera tylko zaznaczone obiekty
+                value = feature[selected_field]
+                if value:
+                    codes.add(value)
+            if self.dlg.comboBox.currentText() == "Jednolite części wód powierzchniowych":
+                self.jcw_pow_list = list(codes)
+            else:
+                self.jcw_pod_list = [code.replace("PL", "") for code in codes]
+
+
         # show the dialog
         self.dlg.show()
         # Run the dialog event loop
@@ -197,4 +230,24 @@ class CatchmentCollector:
         if result:
             # Do something useful here - delete the line containing pass and
             # substitute with your code.
-            pass
+
+            # Pobranie plików PDF
+            project_path = QgsProject.instance().homePath()
+            output_folder = os.path.join(project_path, "Karty_Charakterystyk")
+            os.makedirs(output_folder, exist_ok=True)
+            selected_option = self.dlg.comboBox.currentText()
+            code_list = self.jcw_pow_list if selected_option == "Jednolite części wód powierzchniowych" else self.jcw_pod_list
+            for code in code_list:
+                url = f"http://karty.apgw.gov.pl:4200/api/v1/jcw/pdf?code={code}"
+                file_path = os.path.join(output_folder, f"{code}.pdf")
+                try:
+                    response = requests.get(url)
+                    response.raise_for_status()
+                    with open(file_path, "wb") as f:
+                        f.write(response.content)
+                except requests.RequestException as e:
+                    QMessageBox.warning(self.dlg, "Błąd pobierania", f"Nie udało się pobrać pliku dla {code}: {e}")
+            QMessageBox.information(self.dlg, "Message",
+                                    f"Dane zostały ściągnięte do podfolderu projektu: 'karty charakterystyk'\nLista kodów: {', '.join(code_list)}")
+        else:
+            QMessageBox.information(self.dlg, "Message", "Operacja została anulowana, pliki nie zostały pobrane")
