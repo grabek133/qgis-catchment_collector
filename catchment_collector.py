@@ -203,9 +203,8 @@ class CatchmentCollector:
         if active_layer:
             self.dlg.mcbLayer.setLayer(active_layer)
 
-        # Inicjalizacja list przed pobraniem wartości pól
-        self.jcw_pow_list = []
-        self.jcw_pod_list = []
+        # Inicjalizacja listy przed pobraniem wartości pól
+        self.code_list = []
 
         # Pobranie wartości pól tylko dla zaznaczonych obiektów
         selected_layer = self.dlg.mcbLayer.currentLayer()
@@ -215,11 +214,8 @@ class CatchmentCollector:
             for feature in selected_layer.selectedFeatures():  # Pobiera tylko zaznaczone obiekty
                 value = feature[selected_field]
                 if value:
-                    codes.add(value)
-            if self.dlg.comboBox.currentText() == "Jednolite części wód powierzchniowych":
-                self.jcw_pow_list = list(codes)
-            else:
-                self.jcw_pod_list = [code.replace("PL", "") for code in codes]
+                    codes.add(value.lstrip("PL"))  # Usunięcie 'PL' z początku kodu, jeśli występuje
+            self.code_list = list(codes)
 
 
         # show the dialog
@@ -235,9 +231,8 @@ class CatchmentCollector:
             project_path = QgsProject.instance().homePath()
             output_folder = os.path.join(project_path, "Karty_Charakterystyk")
             os.makedirs(output_folder, exist_ok=True)
-            selected_option = self.dlg.comboBox.currentText()
-            code_list = self.jcw_pow_list if selected_option == "Jednolite części wód powierzchniowych" else self.jcw_pod_list
-            for code in code_list:
+
+            for code in self.code_list:
                 url = f"http://karty.apgw.gov.pl:4200/api/v1/jcw/pdf?code={code}"
                 file_path = os.path.join(output_folder, f"{code}.pdf")
                 try:
@@ -247,7 +242,8 @@ class CatchmentCollector:
                         f.write(response.content)
                 except requests.RequestException as e:
                     QMessageBox.warning(self.dlg, "Błąd pobierania", f"Nie udało się pobrać pliku dla {code}: {e}")
+
             QMessageBox.information(self.dlg, "Message",
-                                    f"Dane zostały ściągnięte do podfolderu projektu: 'karty charakterystyk'\nLista kodów: {', '.join(code_list)}")
+                                    f"Dane zostały ściągnięte do podfolderu projektu: 'karty charakterystyk'\nLista kodów: {', '.join(self.code_list)}")
         else:
             QMessageBox.information(self.dlg, "Message", "Operacja została anulowana, pliki nie zostały pobrane")
